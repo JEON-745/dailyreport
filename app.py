@@ -26,8 +26,9 @@ def check_password():
     st.stop()
 
 # ──────────────────────────── 듀코몰 처리 ────────────────────────────
-def process_dukomol(files, account_totals):
+def process_dukomol(files, account_totals, only_dates=None):
     """files: dict(report=, tonghap=, meta=)  ->  결과 파일경로, 요약메시지"""
+    import gc
     tmp = tempfile.mkdtemp()
     paths = {}
     for k, up in files.items():
@@ -41,12 +42,17 @@ def process_dukomol(files, account_totals):
     summary = []
     cur = paths["report"]
 
-    # 1) 엠케이로드 통합보고서 -> 매체 시트
+    # 1) 엠케이로드 통합보고서 -> 매체 시트 (only_dates 지정 시 그 날짜만)
     if paths["tonghap"]:
         step1 = os.path.join(tmp, "step1.xlsx")
-        build_report.run(paths["tonghap"], cur, step1, verify=False)
+        build_report.run(paths["tonghap"], cur, step1, verify=False, only_dates=only_dates)
         cur = step1
-        summary.append("✅ 매체 시트(N검색·파워링크·쇼핑·구글·모비온·GFA·GDN) 자동 입력 완료")
+        gc.collect()
+        if only_dates:
+            ds = ", ".join(sorted(str(d) for d in only_dates))
+            summary.append(f"✅ 매체 시트 자동 입력 완료 (날짜: {ds})")
+        else:
+            summary.append("✅ 매체 시트(N검색·파워링크·쇼핑·구글·모비온·GFA·GDN) 자동 입력 완료 (전체 날짜)")
 
     # 2) 메타 raw -> SNS 소재별 효율 + 메모
     new_creatives = []
@@ -54,6 +60,7 @@ def process_dukomol(files, account_totals):
         step2 = os.path.join(tmp, "final.xlsx")
         new_creatives = sns_auto.run(paths["meta"], cur, step2, account_totals=account_totals)
         cur = step2
+        gc.collect()
         summary.append("✅ SNS 소재별 효율 + 전환 분해 메모 자동 입력 완료")
 
     return cur, summary, new_creatives
@@ -89,6 +96,31 @@ def main():
         st.info("이 브랜드 프로필은 아직 준비 중입니다. 해당 브랜드의 리포트 양식을 등록하면 활성화됩니다.")
         st.stop()
 
+    # ── 기입할 날짜 선택 (매체 시트) ──
+    only_dates = None
+    date_mode = st.radio(
+        "기입할 날짜 (매체 시트)",
+        ["통합보고서의 모든 날짜", "특정 날짜만"],
+        horizontal=True,
+    )
+    if date_mode == "특정 날짜만":
+        today = datetime.date.today()
+        picked = st.date_input(
+            "채울 날짜 (하루 또는 기간 선택)",
+            value=(today, today),
+            help="선택한 날짜만 매체 시트에 기입합니다. 리포트와 통합보고서 양쪽에 그 날짜가 있어야 채워집니다.",
+        )
+        if isinstance(picked, (list, tuple)):
+            if len(picked) == 2:
+                d0, d1 = picked
+                only_dates = {d0 + datetime.timedelta(days=i) for i in range((d1 - d0).days + 1)}
+            elif len(picked) == 1:
+                only_dates = {picked[0]}
+        else:
+            only_dates = {picked}
+        if only_dates:
+            st.caption("선택됨: " + ", ".join(sorted(str(d) for d in only_dates)))
+
     st.divider()
     files = {}
     for key, label, help_ in prof["inputs"]:
@@ -123,7 +155,7 @@ def main():
             st.stop()
         try:
             with st.spinner("처리 중입니다… (차트·서식 보존하며 값만 채웁니다)"):
-                out_path, summary, new_creatives = prof["process"](files, account_totals)
+                out_path, summary, new_creatives = prof["process"](files, account_totals, only_dates)
             st.success("완료되었습니다!")
             for s in summary:
                 st.write(s)
