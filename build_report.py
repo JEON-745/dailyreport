@@ -156,6 +156,22 @@ def write_block(tws, tb, sb, sws, sdr, tgt_sheet, verify, mismatches, edits, onl
 
 XL_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 
+def _join_pkg(base_dir, target):
+    """OPC 관계의 Target을 패키지 루트 기준 경로로 정규화.
+    절대('/xl/..'), 상대('../comments1.xml', 'worksheets/sheet1.xml') 모두 처리."""
+    t = target.replace("\\", "/")
+    if t.startswith("/"):
+        return t.lstrip("/")
+    out = []
+    for p in (base_dir.rstrip("/") + "/" + t).split("/"):
+        if p == "..":
+            if out: out.pop()
+        elif p in ("", "."):
+            continue
+        else:
+            out.append(p)
+    return "/".join(out)
+
 def _col_idx(ref):
     m = re.match(r"([A-Z]+)(\d+)", ref)
     col, row = m.group(1), int(m.group(2))
@@ -178,9 +194,25 @@ def patch_zip(src_path, edits, out_path, comment_edits=None):
     z = zipfile.ZipFile(src_path)
     wbxml = z.read("xl/workbook.xml").decode("utf-8")
     relsxml = z.read("xl/_rels/workbook.xml.rels").decode("utf-8")
-    name2rid = dict(re.findall(r'<sheet[^>]*name="([^"]+)"[^>]*r:id="(rId\d+)"', wbxml))
-    rid2path = dict(re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"', relsxml))
-    sheetfile = {nm: "xl/" + rid2path[rid] for nm, rid in name2rid.items() if rid in rid2path}
+    # 시트명->rId, rId->파일경로 매핑. 속성 순서/절대경로에 무관하게 태그 단위로 파싱
+    # (Excel/openpyxl/타도구마다 Id·Target·r:id 속성 순서와 Target 형식이 달라 정규식 순서 가정은 깨짐)
+    def _attrs(tag):
+        return dict(re.findall(r'([\w:]+)\s*=\s*"([^"]*)"', tag))
+
+    name2rid = {}
+    for tag in re.findall(r'<sheet\b[^>]*?/?>', wbxml):
+        a = _attrs(tag)
+        rid = a.get("r:id") or a.get("id")
+        if a.get("name") and rid:
+            name2rid[a["name"]] = rid
+
+    rid2target = {}
+    for tag in re.findall(r'<Relationship\b[^>]*?/?>', relsxml):
+        a = _attrs(tag)
+        if a.get("Id") and a.get("Target"):
+            rid2target[a["Id"]] = a["Target"]
+
+    sheetfile = {nm: _join_pkg("xl", rid2target[rid]) for nm, rid in name2rid.items() if rid in rid2target}
 
     patched = {}
     nsm = {"a": XL_NS}
@@ -236,7 +268,7 @@ def patch_zip(src_path, edits, out_path, comment_edits=None):
                 continue
             cmt = re.search(r'Target="([^"]*comments\d*\.xml)"', srelxml)
             if not cmt: continue
-            cpath = "xl/" + cmt.group(1).replace("../", "")
+            cpath = _join_pkg("xl/worksheets", cmt.group(1))  # 워크시트 _rels 기준 상대경로
             raw = patched.get(cpath)
             if raw is None: raw = z.read(cpath)
             cxml = raw.decode("utf-8") if isinstance(raw, bytes) else raw

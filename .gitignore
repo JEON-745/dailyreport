@@ -1,0 +1,21 @@
+# Secrets (배포 비밀번호 — 절대 커밋 금지)
+.streamlit/secrets.toml
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# 데이터/산출물 (광고주 데이터 보호)
+*.xlsx
+!**/template*.xlsx
