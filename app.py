@@ -75,6 +75,41 @@ def process_dukomol(files, account_totals, only_dates=None):
     return cur, summary, new_creatives
 
 
+# ──────────────────────────── NSR 처리 ────────────────────────────
+def process_nsr(files, account_totals, only_dates=None):
+    """NSR: 단일 월시트(가로블록) + 메타 소재별 효율.
+    files: dict(report=, tonghap=, meta=) -> 결과 파일경로, 요약, 신규소재"""
+    import gc, nsr_media
+    tmp = tempfile.mkdtemp()
+    paths = {}
+    for k, up in files.items():
+        if up is None:
+            paths[k] = None; continue
+        p = os.path.join(tmp, f"{k}.xlsx")
+        with open(p, "wb") as o:
+            o.write(up.getbuffer())
+        paths[k] = p
+
+    if not paths.get("tonghap") or not paths.get("meta"):
+        raise ValueError("NSR은 '엠케이로드 통합보고서'와 '메타 소재별 raw' 두 파일이 모두 필요합니다.")
+
+    out = os.path.join(tmp, "nsr_final.xlsx")
+    new = nsr_media.run(paths["tonghap"], paths["meta"], paths["report"], out,
+                        only_dates=only_dates)
+    gc.collect()
+
+    summary = []
+    if only_dates:
+        ds = ", ".join(sorted(str(d) for d in only_dates))
+        summary.append(f"✅ 매체 광고영역(네이버·GFA·크리테오) + META 일별 자동 입력 완료 (날짜: {ds})")
+    else:
+        summary.append("✅ 매체 광고영역(네이버·GFA·크리테오) + META 일별 자동 입력 완료 (raw의 모든 날짜)")
+    summary.append("✅ 메타 소재별 효율(해당 주차, ASC+전환 합산) 자동 입력 완료")
+    # app 표시 형식((브랜드,기획전명), 지표)에 맞춰 변환
+    new2 = [(("NSR", k), m) for (k, m) in new]
+    return out, summary, new2
+
+
 # ──────────────────────────── 프로필 정의 ────────────────────────────
 # 새 브랜드 추가 시 여기에 프로필을 추가하면 됩니다.
 PROFILES = {
@@ -89,6 +124,16 @@ PROFILES = {
         "process": process_dukomol,
     },
     # "다른브랜드 (BRAND B)": {"ready": False},
+    "NSR": {
+        "ready": True,
+        "inputs": [
+            ("report",  "최종 리포트 (NSR 통합보고서)", "현재까지 작성된 리포트 .xlsx"),
+            ("tonghap", "엠케이로드 통합보고서",         "매체 데이터 .xlsx (브검·파워·쇼핑·GFA·크리테오)"),
+            ("meta",    "메타 소재별 Raw 보고서",        "SNS 소재 데이터 .xlsx ('일' 날짜열 포함)"),
+        ],
+        "has_sns_totals": False,
+        "process": process_nsr,
+    },
 }
 
 # ──────────────────────────── 메인 UI ────────────────────────────
