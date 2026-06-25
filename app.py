@@ -63,6 +63,15 @@ def process_dukomol(files, account_totals, only_dates=None):
         gc.collect()
         summary.append("✅ SNS 소재별 효율 + 전환 분해 메모 자동 입력 완료")
 
+    # 3) 추가 시트: [페이스북] 일별 + [듀퐁소품] 4표 + GFA 브로이어 카탈로그
+    if paths["tonghap"] and paths["meta"]:
+        import dukomol_extra
+        step3 = os.path.join(tmp, "final2.xlsx")
+        dukomol_extra.run(cur, paths["tonghap"], paths["meta"], step3, only_dates=only_dates)
+        cur = step3
+        gc.collect()
+        summary.append("✅ [페이스북]·[듀퐁소품]·GFA 브로이어 카탈로그 자동 입력 완료")
+
     return cur, summary, new_creatives
 
 

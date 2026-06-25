@@ -37,25 +37,48 @@ def parse_name(name):
         return (brand, (prod + "_" + rest) if prod else rest)
     return (base, rest)
 
+def _meta_cols(ws):
+    """헤더 이름으로 META 컬럼 위치 감지. '일'(날짜) 컬럼 유무에 무관하게 동작."""
+    h = {}
+    for c in range(1, ws.max_column + 1):
+        v = ws.cell(1, c).value
+        if v is not None:
+            h[str(v).strip()] = c
+    def col(*names):
+        for nm in names:
+            if nm in h:
+                return h[nm]
+        return None
+    return dict(
+        이름=col("광고 이름", "광고이름"),
+        노출=col("노출"),
+        클릭=col("링크 클릭", "링크클릭"),
+        도달=col("도달"),
+        전환=col("구매"),
+        장바구니=col("장바구니에 담기", "장바구니"),
+        종료=col("보고 종료", "보고종료"),
+    )
+
 def metric_groups(meta_path):
     ws = load_workbook(meta_path, data_only=True)["Raw Data Report"]
+    cm = _meta_cols(ws)
     g = defaultdict(lambda: dict(노출=0,클릭=0,도달=0,전환=0,장바구니=0,단일전환=0,컬렉션전환=0))
     end = None
     for r in range(2, ws.max_row+1):
-        a = ws.cell(r,1).value
+        a = ws.cell(r, cm["이름"]).value
         if not a: continue
         key = parse_name(a)
         if key is None: continue
-        f = lambda c: (ws.cell(r,c).value if isinstance(ws.cell(r,c).value,(int,float)) else 0)
+        f = lambda c: (ws.cell(r,c).value if c and isinstance(ws.cell(r,c).value,(int,float)) else 0)
         d = g[key]
-        d["노출"]+=f(8); d["클릭"]+=f(9); d["도달"]+=f(10); d["전환"]+=f(11); d["장바구니"]+=f(12)
+        d["노출"]+=f(cm["노출"]); d["클릭"]+=f(cm["클릭"]); d["도달"]+=f(cm["도달"]); d["전환"]+=f(cm["전환"]); d["장바구니"]+=f(cm["장바구니"])
         # 전환 광고형식 분해: 단일이미지=전환(제품X), 컬렉션광고=전환_제품 + 트래픽
         nm = str(a)
         if "_트래픽_" in nm or nm.endswith("_제품"):
-            d["컬렉션전환"]+=f(11)
+            d["컬렉션전환"]+=f(cm["전환"])
         else:
-            d["단일전환"]+=f(11)
-        u = ws.cell(r,21).value
+            d["단일전환"]+=f(cm["전환"])
+        u = ws.cell(r, cm["종료"]).value if cm["종료"] else None
         ud = None
         if isinstance(u,datetime.datetime): ud=u.date()
         elif isinstance(u,str):
