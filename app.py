@@ -110,6 +110,40 @@ def process_nsr(files, account_totals, only_dates=None):
     return out, summary, new2
 
 
+# ──────────────────────────── 아틀라스 처리 ────────────────────────────
+def process_atlas(files, account_totals, only_dates=None):
+    """아틀라스(NSR형): 단일 월시트(파워링크 PC/MO·GFA·SNS) + 메타 소재별 효율_*.
+    files: dict(report=, tonghap=, meta=) -> 결과 파일경로, 요약, 신규소재"""
+    import gc, atlas_media
+    tmp = tempfile.mkdtemp()
+    paths = {}
+    for k, up in files.items():
+        if up is None:
+            paths[k] = None; continue
+        p = os.path.join(tmp, f"{k}.xlsx")
+        with open(p, "wb") as o:
+            o.write(up.getbuffer())
+        paths[k] = p
+
+    if not paths.get("tonghap") or not paths.get("meta"):
+        raise ValueError("아틀라스는 '엠케이로드 통합보고서'와 '메타 소재별 raw' 두 파일이 모두 필요합니다.")
+
+    out = os.path.join(tmp, "atlas_final.xlsx")
+    new = atlas_media.run(paths["tonghap"], paths["meta"], paths["report"], out,
+                          only_dates=only_dates)
+    gc.collect()
+
+    summary = []
+    if only_dates:
+        ds = ", ".join(sorted(str(d) for d in only_dates))
+        summary.append(f"✅ 매체 광고영역(파워링크 PC·MO·GFA) + META 일별 자동 입력 완료 (날짜: {ds})")
+    else:
+        summary.append("✅ 매체 광고영역(파워링크 PC·MO·GFA) + META 일별 자동 입력 완료 (raw의 모든 날짜)")
+    summary.append("✅ 메타 소재별 효율(해당 주차, 기획전명+번호 매칭, 전환+트래픽 합산) 자동 입력 완료")
+    new2 = [(("아틀라스", k), m) for (k, m) in new]
+    return out, summary, new2
+
+
 # ──────────────────────────── 프로필 정의 ────────────────────────────
 # 새 브랜드 추가 시 여기에 프로필을 추가하면 됩니다.
 PROFILES = {
@@ -133,6 +167,16 @@ PROFILES = {
         ],
         "has_sns_totals": False,
         "process": process_nsr,
+    },
+    "아틀라스 (ATLAS)": {
+        "ready": True,
+        "inputs": [
+            ("report",  "최종 리포트 (아틀라스 통합보고서)", "현재까지 작성된 리포트 .xlsx"),
+            ("tonghap", "엠케이로드 통합보고서",            "매체 데이터 .xlsx (파워링크·GFA)"),
+            ("meta",    "메타 소재별 Raw 보고서",           "SNS 소재 데이터 .xlsx ('일' 날짜열 포함)"),
+        ],
+        "has_sns_totals": False,
+        "process": process_atlas,
     },
 }
 
