@@ -144,6 +144,44 @@ def process_atlas(files, account_totals, only_dates=None):
     return out, summary, new2
 
 
+# ──────────────────────────── 챌린저골프웨어 처리 ────────────────────────────
+def process_challenger(files, account_totals, only_dates=None):
+    """챌린저: 매체 리포트(+META) -> 통합보고서 일간리포트(자사몰·브랜드스토어) 채움.
+    결과물 1개(=채워진 통합보고서). files: dict(report=통합보고서, source=매체리포트, meta=)"""
+    import gc, challenger_media
+    tmp = tempfile.mkdtemp()
+    paths = {}
+    for k, up in files.items():
+        if up is None:
+            paths[k] = None; continue
+        p = os.path.join(tmp, f"{k}.xlsx")
+        with open(p, "wb") as o:
+            o.write(up.getbuffer())
+        paths[k] = p
+
+    if not paths.get("source"):
+        raise ValueError("챌린저는 '챌린저 매체 리포트'(검색광고·브랜드검색·GFA·모비온·구글)가 필요합니다.")
+
+    out = os.path.join(tmp, "challenger_final.xlsx")
+    meta_missing = challenger_media.run(paths["source"], paths.get("meta"), paths["report"], out,
+                                        only_dates=only_dates)
+    gc.collect()
+
+    summary = []
+    if only_dates:
+        ds = ", ".join(sorted(str(d) for d in only_dates))
+        summary.append(f"✅ 자사몰(브랜드검색·파워링크·GFA·모비온·구글) + 브랜드스토어(GFA) 자동 입력 완료 (날짜: {ds})")
+    else:
+        summary.append("✅ 자사몰(브랜드검색·파워링크·GFA·모비온·구글) + 브랜드스토어(GFA) 자동 입력 완료 (매체 리포트의 모든 날짜)")
+    if paths.get("meta"):
+        summary.append("✅ META(SNS 광고) 일별 자동 입력 완료 (지출×1.1÷0.85)")
+        summary.append("✅ META 소재별 효율 주차 블록 재합산 완료 (노출·클릭·전환·장바구니·매출·광고비) — 도달·빈도는 수기 입력")
+        if meta_missing:
+            lst = ", ".join(f"{a} {b}({c:,}원)" for a, b, c in meta_missing)
+            summary.append(f"⚠ META 소재별효율: 시트에 행이 없는 소재 {len(meta_missing)}건 — 직접 행 추가 필요: {lst}")
+    return out, summary, []
+
+
 # ──────────────────────────── 프로필 정의 ────────────────────────────
 # 새 브랜드 추가 시 여기에 프로필을 추가하면 됩니다.
 PROFILES = {
@@ -177,6 +215,16 @@ PROFILES = {
         ],
         "has_sns_totals": False,
         "process": process_atlas,
+    },
+    "챌린저골프웨어 (CHALLENGER)": {
+        "ready": True,
+        "inputs": [
+            ("report",  "최종 리포트 (챌린저 통합보고서)", "일간리포트(자사몰·브랜드스토어)를 채울 통합보고서 .xlsx ← 결과물"),
+            ("source",  "챌린저 매체 리포트",              "검색광고·브랜드검색·네이버GFA·모비온·구글 시트 .xlsx ← 소스"),
+            ("meta",    "메타 소재별 Raw 보고서",          "SNS 소재 데이터 .xlsx ('일' 날짜열 포함)"),
+        ],
+        "has_sns_totals": False,
+        "process": process_challenger,
     },
 }
 
