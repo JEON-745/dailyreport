@@ -84,7 +84,7 @@ def _meta_cols(ws):
          for c in range(1, ws.max_column + 1) if ws.cell(1, c).value is not None}
     col = lambda *ns: next((h[n] for n in ns if n in h), None)
     return dict(일=col("일"), 이름=col("광고 이름"), 노출=col("노출"), 클릭=col("링크 클릭"),
-                구매=col("구매"), 장바=col("장바구니에 담기"),
+                도달=col("도달"), 구매=col("구매"), 장바=col("장바구니에 담기"),
                 매출=col("구매 전환값"), 지출=col("지출 금액 (KRW)"))
 
 
@@ -102,9 +102,10 @@ def meta_daily(ws, cm, d):
 
 
 # ──────────────────────────── META 소재별 효율 (주차별·소재별) ────────────────────────────
-# 합산 가능한 6개만 채움: 노출(F)·클릭(G)·전환(J)·장바구니(K)·매출(N)·광고비(O).
-# 도달(I)·빈도(L)는 주간 중복제거 값이라 일별 raw로 재현 불가 → 보존(수기).
-MC_COLS = dict(노출="F", 클릭="G", 전환="J", 장바구니="K", 매출="N", 광고비="O")
+# 채움 항목: 노출(F)·클릭(G)·도달(I)·전환(J)·장바구니(K)·빈도(L)·매출(N)·광고비(O).
+# 도달(I)은 일별 합산, 빈도(L)=노출/도달. 주간 도달은 중복제거 값이라 정확값과 다를 수 있음.
+# 블록 맨 마지막 SUM/합계 행은 F가 수식이라 통째로 보존됨(빈도 합계행도 수기 유지).
+MC_COLS = dict(노출="F", 클릭="G", 도달="I", 전환="J", 장바구니="K", 빈도="L", 매출="N", 광고비="O")
 
 
 def _parse_creative(name):
@@ -157,9 +158,10 @@ def fill_meta_creative(meta_path, tgt_ws, dates):
             dd = to_date(mws.cell(r, cm["일"]).value)
             if not dd or not (ws_ <= dd <= we_): continue
             k = _parse_creative(mws.cell(r, cm["이름"]).value)
-            a = agg.setdefault(k, dict(노출=0, 클릭=0, 전환=0, 장바구니=0, 매출=0, 지출=0))
+            a = agg.setdefault(k, dict(노출=0, 클릭=0, 도달=0, 전환=0, 장바구니=0, 매출=0, 지출=0))
             a["노출"] += _n(mws.cell(r, cm["노출"]).value)
             a["클릭"] += _n(mws.cell(r, cm["클릭"]).value)
+            a["도달"] += _n(mws.cell(r, cm["도달"]).value) if cm["도달"] else 0
             a["전환"] += _n(mws.cell(r, cm["구매"]).value)
             a["장바구니"] += _n(mws.cell(r, cm["장바"]).value) if cm["장바"] else 0
             a["매출"] += _n(mws.cell(r, cm["매출"]).value)
@@ -188,8 +190,9 @@ def fill_meta_creative(meta_path, tgt_ws, dates):
                     missing.append((k[0], k[1], round(a["지출"] * 1.1 / 0.85)))
                 continue
             matched.add(k)
-            vals = dict(노출=a["노출"], 클릭=a["클릭"], 전환=a["전환"],
+            vals = dict(노출=a["노출"], 클릭=a["클릭"], 도달=a["도달"], 전환=a["전환"],
                         장바구니=a["장바구니"], 매출=a["매출"],
+                        빈도=round(a["노출"] / a["도달"], 2) if a["도달"] else 0,
                         광고비=round(a["지출"] * 1.1 / 0.85))
             for fld, colL in MC_COLS.items():
                 edits[f"{colL}{r}"] = vals[fld]
@@ -197,22 +200,24 @@ def fill_meta_creative(meta_path, tgt_ws, dates):
     return edits, missing
 
 
-def run(source_path, meta_path, tonghap_path, out_path, only_dates=None, month=6, year=2026):
-    """source(매체 리포트) + meta → tonghap(통합보고서) 일간리포트 채움. 결과 1개 파일."""
+def run(source_path, meta_path, tonghap_path, out_path, only_dates=None):
+    """source(매체 리포트) + meta → tonghap(통합보고서) 일간리포트 채움. 결과 1개 파일.
+    날짜는 파일 값 기반으로 자동 인식 → 월(6월/7월…) 무관하게 동작."""
     src = load_workbook(source_path, data_only=True)
     tgt = load_workbook(tonghap_path, data_only=True)
     tgt_rows = {"일간리포트 (자사몰)": _tgt_rowmap_A(tgt["일간리포트 (자사몰)"]),
                 "일간리포트 (브랜드스토어)": _tgt_rowmap_A(tgt["일간리포트 (브랜드스토어)"])}
     src_rows = {s: _src_rowmap_B(src[s]) for s in set(sp[2] for sp in SPECS)}
 
-    # 대상 날짜: 지정 없으면 소스 매체 리포트에 노출>0인 모든 날짜
+    # 대상 날짜: 지정 없으면, 소스 매체 리포트에 노출>0이고 통합보고서에도 존재하는 모든 날짜
+    # (월/연도 하드코딩 없음 → 7월·8월 파일도 그대로 적응)
     if only_dates:
         dates = sorted(only_dates)
     else:
         ck = src["검색광고"]; rm = src_rows["검색광고"]
+        tgt_self = tgt_rows["일간리포트 (자사몰)"]
         dates = sorted(d for d, r in rm.items()
-                       if d.month == month and d.year == year
-                       and _n(ck.cell(r, CI("N")).value))
+                       if d in tgt_self and _n(ck.cell(r, CI("N")).value))
 
     edits = {"일간리포트 (자사몰)": {}, "일간리포트 (브랜드스토어)": {}}
     filled = 0

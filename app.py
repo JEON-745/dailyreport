@@ -175,7 +175,7 @@ def process_challenger(files, account_totals, only_dates=None):
         summary.append("✅ 자사몰(브랜드검색·파워링크·GFA·모비온·구글) + 브랜드스토어(GFA) 자동 입력 완료 (매체 리포트의 모든 날짜)")
     if paths.get("meta"):
         summary.append("✅ META(SNS 광고) 일별 자동 입력 완료 (지출×1.1÷0.85)")
-        summary.append("✅ META 소재별 효율 주차 블록 재합산 완료 (노출·클릭·전환·장바구니·매출·광고비) — 도달·빈도는 수기 입력")
+        summary.append("✅ META 소재별 효율 주차 블록 재합산 완료 (노출·클릭·도달·전환·장바구니·빈도·매출·광고비) — 빈도=노출/도달, 블록 맨 마지막 합계행은 수기 유지")
         if meta_missing:
             lst = ", ".join(f"{a} {b}({c:,}원)" for a, b, c in meta_missing)
             summary.append(f"⚠ META 소재별효율: 시트에 행이 없는 소재 {len(meta_missing)}건 — 직접 행 추가 필요: {lst}")
@@ -296,8 +296,8 @@ def main():
         if not files.get("report"):
             st.error("최종 리포트 파일을 올려주세요.")
             st.stop()
-        if not files.get("tonghap") and not files.get("meta"):
-            st.error("통합보고서 또는 메타 보고서 중 최소 하나는 올려주세요.")
+        if not files.get("tonghap") and not files.get("source") and not files.get("meta"):
+            st.error("매체 데이터(통합보고서·매체 리포트) 또는 메타 보고서 중 최소 하나는 올려주세요.")
             st.stop()
         try:
             with st.spinner("처리 중입니다… (차트·서식 보존하며 값만 채웁니다)"):
